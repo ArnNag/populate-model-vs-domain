@@ -167,7 +167,7 @@ public class PopulateModelvsDomain {
 
     public static void populateOneComparison(String modelDir, int testModelId, String sid, int EQRThreshold, int releaseID) throws Exception {
 	    	    System.out.println("model: " + testModelId + " sid: " + sid);
-		    PreparedStatement stmt1 = LocalSQL.prepareStatement("select astral_domain.id, scop_node.description from astral_domain JOIN scop_node on astral_domain.node_id = scop_node.id where scop_node.sid = ? and release_id = ? and style_id = 1 and source_id = 1;");
+		    PreparedStatement stmt1 = LocalSQL.prepareStatement("select astral_domain.id, scop_node.description, raf.line from astral_domain JOIN scop_node ON astral_domain.node_id = scop_node.id JOIN link_pdb on scop_node.id = link_pdb.node_id JOIN raf on link_pdb.pdb_chain_id = raf.pdb_chain_id where scop_node.sid = ? and scop_node.release_id = ? and raf.raf_version_id = 3 and first_release_id is null and last_release_id is null and astral_domain.style_id = 1 and astral_domain.source_id = 1;");
 		    PreparedStatement stmt3 = LocalSQL.prepareStatement("insert into model_vs_domain_structure_alignment (model_id, domain_id, structure_aligner_id, z_score, model_start, model_end, domain_start, domain_end, translate_x, translate_y, translate_z, rotate_1_1, rotate_1_2, rotate_1_3, rotate_2_1, rotate_2_2, rotate_2_3, rotate_3_1, rotate_3_2, rotate_3_3, num_eq_res) values (?, ?, 2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);");
 			    stmt1.setString(1, sid);
 			    stmt1.setInt(2, releaseID);
@@ -190,6 +190,7 @@ public class PopulateModelvsDomain {
 
 			    Matrix rotMat = comp.getBlockRotationMatrix()[0];
 			    Atom shiftVec = comp.getBlockShiftVector()[0];
+			    double zScore = comp.getProbability();
 			    int[][][] optAln = comp.getOptAln();
 			    ArrayList<ArrayList<int[]>> hits = splitHits(optAln, 50);
 			    // System.out.println("hits: " + hits.get(0).get(0)[0]);
@@ -201,7 +202,6 @@ public class PopulateModelvsDomain {
 				    int modelEnd = hits.get(1).get(h)[1];
 				    int domainStart = hits.get(0).get(h)[0] - resIDStart;
 				    int domainEnd = hits.get(0).get(h)[1] - resIDStart;
-				    double zScore = comp.getProbability();
 				    
 				    int i = 1;
 				    stmt3.setInt(i++, testModelId);
@@ -258,16 +258,32 @@ public class PopulateModelvsDomain {
 			   }
 			}
 		}
-		    PreparedStatement stmt2 = LocalSQL.prepareStatement("select pdb_path from model_structure where id = ?;");
-		    stmt2.setInt(1, testModelId);
-		    ResultSet modelRs = stmt2.executeQuery();
-		    modelRs.next();
-		    String modelDir = modelRs.getString("pdb_path");
+		    String modelDir = getModelDir(testModelId);
 		    for (String sid : allRep) {
 			    populateOneComparison(modelDir, testModelId, sid, 15, releaseID);
 		    }
         }
 
+	private static String getModelDir(int modelId) throws Exception {
+		    PreparedStatement stmt2 = LocalSQL.prepareStatement("select pdb_path from model_structure where id = ?;");
+		    stmt2.setInt(1, modelId);
+		    ResultSet modelRs = stmt2.executeQuery();
+		    modelRs.next();
+		    return modelRs.getString("pdb_path");
+	}
+
+	public static void testOneComparison() {
+		int testModelId = 55654;
+	        int releaseID = 17;
+		String sid = "d1zj6a1";
+		try {
+		    String modelDir = getModelDir(testModelId);
+		    populateOneComparison(modelDir, testModelId, sid, 15, releaseID);
+		} catch (Exception e) {
+		    System.out.println("Exception: "+e.getMessage());
+		    e.printStackTrace();
+		}
+	}
 	public static void populateTest() {
 		int testModelId = 55654;
 	        int releaseID = 17;
@@ -400,7 +416,7 @@ public class PopulateModelvsDomain {
 
 	public static void main(String[] args) {
 		try {
-		    populateAllModels();
+		    populateTest();
 		} catch (Exception e) {
 		    System.out.println("Exception: " + e.getMessage());
 		    e.printStackTrace();
