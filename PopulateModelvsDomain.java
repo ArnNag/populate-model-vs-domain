@@ -167,8 +167,8 @@ public class PopulateModelvsDomain {
 
     public static void populateOneComparison(String modelDir, int testModelId, String sid, int EQRThreshold, int releaseID) throws Exception {
 	    	    System.out.println("model: " + testModelId + " sid: " + sid);
-		    PreparedStatement stmt1 = LocalSQL.prepareStatement("select astral_domain.id, scop_node.description, raf.line from astral_domain JOIN scop_node ON astral_domain.node_id = scop_node.id JOIN link_pdb on scop_node.id = link_pdb.node_id JOIN raf on link_pdb.pdb_chain_id = raf.pdb_chain_id where scop_node.sid = ? and scop_node.release_id = ? and raf.raf_version_id = 3 and first_release_id is null and last_release_id is null and astral_domain.style_id = 1 and astral_domain.source_id = 1;");
-		    PreparedStatement stmt3 = LocalSQL.prepareStatement("insert into model_vs_domain_structure_alignment (model_id, domain_id, structure_aligner_id, z_score, model_start, model_end, domain_start, domain_end, translate_x, translate_y, translate_z, rotate_1_1, rotate_1_2, rotate_1_3, rotate_2_1, rotate_2_2, rotate_2_3, rotate_3_1, rotate_3_2, rotate_3_3, num_eq_res) values (?, ?, 2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);");
+		    PreparedStatement stmt1 = LocalSQL.prepareStatement("select astral_domain.id, scop_node.description, raf.line from astral_domain JOIN scop_node ON astral_domain.node_id = scop_node.id JOIN link_pdb on scop_node.id = link_pdb.node_id JOIN raf on link_pdb.pdb_chain_id = raf.pdb_chain_id where scop_node.sid = ? and scop_node.release_id = ? and raf.raf_version_id = 2 and first_release_id is null and last_release_id is null and astral_domain.style_id = 1 and astral_domain.source_id = 1;");
+		    PreparedStatement stmt3 = LocalSQL.prepareStatement("insert into model_vs_domain_structure_alignment (model_id, domain_id, structure_aligner_id, z_score, model_start, model_end, domain_start, domain_end, translate_x, translate_y, translate_z, rotate_1_1, rotate_1_2, rotate_1_3, rotate_2_1, rotate_2_2, rotate_2_3, rotate_3_1, rotate_3_2, rotate_3_3, num_eq_res) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);");
 			    stmt1.setString(1, sid);
 			    stmt1.setInt(2, releaseID);
 			    // System.out.println(stmt1);
@@ -200,12 +200,13 @@ public class PopulateModelvsDomain {
 			    for (int h = 0; h < hits.get(0).size(); h++) {
 				    int modelStart = hits.get(1).get(h)[0]; // check whether model or hit is first
 				    int modelEnd = hits.get(1).get(h)[1];
-				    int domainStart = hits.get(0).get(h)[0] - resIDStart;
-				    int domainEnd = hits.get(0).get(h)[1] - resIDStart;
+				    int domainStart = hits.get(0).get(h)[0];
+				    int domainEnd = hits.get(0).get(h)[1];
 				    
 				    int i = 1;
 				    stmt3.setInt(i++, testModelId);
 				    stmt3.setInt(i++, domainID);
+				    stmt3.setInt(i++, 2);
 				    stmt3.setDouble(i++, zScore);
 				    stmt3.setInt(i++, modelStart);
 				    stmt3.setInt(i++, modelEnd);
@@ -223,14 +224,12 @@ public class PopulateModelvsDomain {
 				    stmt3.setDouble(i++, rotMat.get(2, 0));
 				    stmt3.setDouble(i++, rotMat.get(2, 1));
 				    stmt3.setDouble(i++, rotMat.get(2, 2));
-				    stmt3.setDouble(i++, rotMat.get(2, 2));
 				    stmt3.setDouble(i++, NrEQR);
-				    // stmt3.executeUpdate();
+				    stmt3.executeUpdate();
 			    }
     }
 
 	public static void populateOneModel(int releaseID, int testModelId) throws Exception {
-		    LocalSQL.connectRW();
 
 
 		    ArrayList<String> supfam = new ArrayList<String>();
@@ -275,7 +274,7 @@ public class PopulateModelvsDomain {
 	public static void testOneComparison() {
 		int testModelId = 55654;
 	        int releaseID = 17;
-		String sid = "d1zj6a1";
+		String sid = "d1rifa_";
 		try {
 		    String modelDir = getModelDir(testModelId);
 		    populateOneComparison(modelDir, testModelId, sid, 15, releaseID);
@@ -416,7 +415,8 @@ public class PopulateModelvsDomain {
 
 	public static void main(String[] args) {
 		try {
-		    populateTest();
+		    LocalSQL.connectRW();
+		    testOneComparison();
 		} catch (Exception e) {
 		    System.out.println("Exception: " + e.getMessage());
 		    e.printStackTrace();
