@@ -4,6 +4,7 @@ import java.io.File;
 import java.util.Scanner;
 import java.util.Arrays;
 import java.util.StringTokenizer;
+import javafx.util.Pair;
 
 import java.util.regex.*;
 
@@ -81,57 +82,36 @@ public class PopulateModelvsDomain {
 
     }
 
-    private static void testResIDStart() {
-	    System.out.println(getResIDStart("1ux8 A:"));
-	    System.out.println(getResIDStart("1ux8 A:10-20"));
-    }
-
-    // assume single chain domain
-    // output: beginning of domain from SCOP definition (residue identifier in ATOM records)
-    public static String getResIDStart(String description) {
-        String firstRes = null;
-    	try {
-            Pattern regionPattern = Pattern.compile("\\s*(\\S+?)-(\\S+)\\s*$");
-
-		int pos = description.indexOf(':');
-		if (pos != -1) {
-		    String region = description.substring(pos + 1);
-
-		    // figure out boundaries
-		    if (region.equals("")) {
-			firstRes = "whole chain";
-		    }
-		    Matcher m = regionPattern.matcher(region);
-		    if (m.matches()) {
-			firstRes = m.group(1);
-		    }
-		}
-        } catch (Exception e) {
-            System.out.println("Exception when handling " + description + ": " + e.getMessage());
-            e.printStackTrace();
-	}
-    return firstRes;
-
-    }
 
     /**
        Translate an index (0-based) in ATOM records of a domain seq into an index in the RAF (0-based).  -1 if not
        found.
+	nodeID: scop_node.id of the domain
+	ATOMDomainIdx: 0-indexed into the ATOM records of the domain sequence
 	*/
 
-    private static int translateATOMDomainIdx(String body, int ATOMDomainIdx, String resIDStart) {
-	    int ATOMStart;
-	    if (resIDStart == "whole chain") {
-		    ATOMStart = 0;
-	    } else {
-		    int rafStart = RAF.indexOf(body, resIDStart, true);
-		    ATOMStart = RAF.rTranslateIndex(body, rafStart, 1);
+    private static ArrayList<Pair<Integer, Integer>> translateATOMDomainIdx(int nodeID, int[] ATOMDomainIndices) {
+	Pair<SequenceFragmentRAFIdx, SequenceFragmentRAFIdx> domainFragPair = domainSeq(nodeID, 1, 0);
+	SequenceFragmentRAFIdx domainFragATOM = domainFragPair.getKey();
+	SequenceFragmentRAFIdx domainFragSEQRES = domainFragPair.getValue();
+	ArrayList<Pair<Integer, Integer>> rv = new ArrayList<>();
+	for (Integer ATOMDomainIdx : ATOMDomainIndices) {
+	    Integer RAFidx = -1;
+	    Integer SEQRESidx = -1;
+	    try {
+	        RAFidx = domainFragATOM.RAFindices.get(ATOMDomainIdx);
+	        for (int i = 0; i < domainFragSEQRES.RAFindices.size(); i++) {
+		    if (domainFragSEQRES.RAFindices.get(i).equals(RAFidx)) {
+			SEQRESidx = i;
+			break;
+		    }
+	        }
+	    } finally {
+	        rv.add(new Pair<> (RAFidx, SEQRESidx));
 	    }
-	    int ATOMFullidx = ATOMStart + ATOMDomainIdx;
-	    return RAF.translateIndex(body, ATOMFullidx, 1);
+	}
+	return rv; 
     }
-
-    // getResID
 
     // first axis: which sequence
     // second axis: which consecutive run
@@ -169,8 +149,8 @@ public class PopulateModelvsDomain {
 
     public static void populateOneComparison(String modelDir, int testModelId, String sid, int EQRThreshold, int releaseID) throws Exception {
 	    	    System.out.println("model: " + testModelId + " sid: " + sid);
-		    PreparedStatement stmt1 = LocalSQL.prepareStatement("select astral_domain.id, scop_node.description, raf.line from astral_domain JOIN scop_node ON astral_domain.node_id = scop_node.id JOIN link_pdb on scop_node.id = link_pdb.node_id JOIN raf on link_pdb.pdb_chain_id = raf.pdb_chain_id where scop_node.sid = ? and scop_node.release_id = ? and raf.raf_version_id = 3 and first_release_id is null and last_release_id is null and astral_domain.style_id = 1 and astral_domain.source_id = 1;");
-		    PreparedStatement stmt3 = LocalSQL.prepareStatement("insert into model_vs_domain_structure_alignment (model_id, domain_id, structure_aligner_id, z_score, model_start, model_end, domain_start_ATOM, domain_end_ATOM, domain_start_raf, domain_end_raf, translate_x, translate_y, translate_z, rotate_1_1, rotate_1_2, rotate_1_3, rotate_2_1, rotate_2_2, rotate_2_3, rotate_3_1, rotate_3_2, rotate_3_3, num_eq_res) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);");
+		    PreparedStatement stmt1 = LocalSQL.prepareStatement("select astral_domain.id as ad_id, scop_node.id as node_id from astral_domain JOIN scop_node ON astral_domain.node_id = scop_node.id JOIN link_pdb on scop_node.id = link_pdb.node_id where scop_node.sid = ? and scop_node.release_id = ? and astral_domain.style_id = 1 and astral_domain.source_id = 1;");
+		    PreparedStatement stmt3 = LocalSQL.prepareStatement("insert into model_vs_domain_structure_alignment (model_id, domain_id, structure_aligner_id, z_score, model_start, model_end, domain_start_ATOM, domain_end_ATOM, domain_start_raf, domain_end_raf, domain_start_SEQRES, domain_end_SEQRES, translate_x, translate_y, translate_z, rotate_1_1, rotate_1_2, rotate_1_3, rotate_2_1, rotate_2_2, rotate_2_3, rotate_3_1, rotate_3_2, rotate_3_3, num_eq_res) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);");
 			    stmt1.setString(1, sid);
 			    stmt1.setInt(2, releaseID);
 			    System.out.println(stmt1);
@@ -179,12 +159,10 @@ public class PopulateModelvsDomain {
 				    System.out.println("No matching SCOP node or RAFv3 line for this sid");
 				    return;
 			    }
-			    int domainID = domainRs.getInt("id");
-			    String description = domainRs.getString("description");
-			    String resIDStart = getResIDStart(description);
-			    String body = RAF.getRAFBody(domainRs.getString("line"));
+			    int astralDomainID = domainRs.getInt("ad_id");
+			    int nodeID = domainRs.getInt("node_id");
 			    if (domainRs.next()) {
-				    System.out.println("There are multiple domainIDs!");
+				    System.out.println("There are multiple nodeIDs!");
 			    }
 			    String pdbStyleDir = String.join("/", "/lab/proj/astral/pdbstyle/2.06", sid.substring(2,4), sid) + ".ent";
 			    AFPChain comp = getComparison(modelDir, pdbStyleDir);
@@ -206,27 +184,29 @@ public class PopulateModelvsDomain {
 			    for (int h = 0; h < hits.get(0).size(); h++) {
 				    int modelStart = hits.get(1).get(h)[0]; // check whether model or hit is first
 				    int modelEnd = hits.get(1).get(h)[1];
-				    // System.out.println("body: " + body);
 				    // System.out.println("optAln: " + Arrays.deepToString(optAln));
 				    // System.out.println("hit index: " + hits.get(1).get(h)[1]);
-				    // System.out.println("resIDStart: " + resIDStart);
 				    // System.out.println("modelEnd: " + modelEnd);
-				    int domainStartATOM = hits.get(0).get(h)[0]; 
-				    int domainEndATOM = hits.get(0).get(h)[1]; 
-				    int domainStartRAF = translateATOMDomainIdx(body, domainStartATOM, resIDStart);
-				    int domainEndRAF = translateATOMDomainIdx(body, domainEndATOM, resIDStart);
+				    int[] domainBoundariesATOM = hits.get(0).get(h);
+				    ArrayList<Pair<Integer,Integer>> domainBoundariesPair = translateATOMDomainIdx(nodeID, domainBoundariesATOM);
+				    int domainStartRAF = domainBoundariesPair.get(0).getKey();
+				    int domainEndRAF = domainBoundariesPair.get(1).getKey();
+				    int domainStartSEQRES = domainBoundariesPair.get(0).getValue();
+				    int domainEndSEQRES = domainBoundariesPair.get(1).getValue();
 				    
 				    int i = 1;
 				    stmt3.setInt(i++, testModelId);
-				    stmt3.setInt(i++, domainID);
-				    stmt3.setInt(i++, 2);
+				    stmt3.setInt(i++, astralDomainID);
+				    stmt3.setInt(i++, 1);
 				    stmt3.setDouble(i++, zScore);
 				    stmt3.setInt(i++, modelStart);
 				    stmt3.setInt(i++, modelEnd);
-				    stmt3.setInt(i++, domainStartATOM);
-				    stmt3.setInt(i++, domainEndATOM);
+				    stmt3.setInt(i++, domainBoundariesATOM[0]);
+				    stmt3.setInt(i++, domainBoundariesATOM[1]);
 				    stmt3.setInt(i++, domainStartRAF);
 				    stmt3.setInt(i++, domainEndRAF);
+				    stmt3.setInt(i++, domainStartSEQRES);
+				    stmt3.setInt(i++, domainEndSEQRES);
 				    stmt3.setDouble(i++, shiftVec.getX());
 				    stmt3.setDouble(i++, shiftVec.getY());
 				    stmt3.setDouble(i++, shiftVec.getZ());
@@ -292,7 +272,7 @@ public class PopulateModelvsDomain {
        instance of firstRes and the LAST instance of lastRes.
        Returns null if anything was not found or range is reversed.
     */
-    final public static SequenceFragmentRAFIdx partialChainSeq(String body, int sourceType, String firstRes, String lastRes) {
+    final public static Pair<SequenceFragmentRAFIdx, SequenceFragmentRAFIdx> partialChainSeqPair(String body, String firstRes, String lastRes) {
         int firstResN = RAF.indexOf(body, firstRes, true);
         int lastResN = RAF.indexOf(body, lastRes, false);
         // System.out.println(firstRes+" "+firstResN);
@@ -300,7 +280,7 @@ public class PopulateModelvsDomain {
         if ((firstResN == -1) || (lastResN == -1) || (firstResN > lastResN)) {
             return null;
         } else {
-            return partialChainSeq(body, sourceType, firstResN, lastResN);
+            return partialChainSeqPair(body, firstResN, lastResN);
         }      
     }
 
@@ -314,22 +294,17 @@ public class PopulateModelvsDomain {
        greater than or equal to firstRes.  Indices are not checked;
        this will cause an exception if off either end.
     */
-    final public static SequenceFragmentRAFIdx partialChainSeq(String body, 
-                                                         int sourceType, 
+    final public static Pair<SequenceFragmentRAFIdx, SequenceFragmentRAFIdx> partialChainSeqPair(String body, 
                                                          int firstRes, 
                                                          int lastRes) throws IllegalArgumentException {
-        SequenceFragmentRAFIdx rv = new SequenceFragmentRAFIdx(lastRes - firstRes + 1);
+        SequenceFragmentRAFIdx rvATOM = new SequenceFragmentRAFIdx(lastRes - firstRes + 1);
+        SequenceFragmentRAFIdx rvSEQRES = new SequenceFragmentRAFIdx(lastRes - firstRes + 1);
         for (int i = firstRes * 7; i <= lastRes * 7; i += 7) {
 	    int RAFidx = Math.floorDiv(i, 7);
-            if (sourceType == 1) {
-                rv.append(body.charAt(i + 5), RAFidx);
-            } else if (sourceType == 2) {
-                rv.append(body.charAt(i + 6), RAFidx);
-            } else {
-                throw new IllegalArgumentException("'sourceType' must have value 1 or 2.");
-            }
+            rvATOM.append(body.charAt(i + 5), RAFidx);
+            rvSEQRES.append(body.charAt(i + 6), RAFidx);
         }
-        return rv;
+        return new Pair<> (rvATOM, rvSEQRES);
     }
 
     /**
@@ -354,16 +329,17 @@ public class PopulateModelvsDomain {
 
        Returns null if error.
     */
-    final public static SequenceFragmentRAFIdx domainSeq(int domainID, int sourceType, int styleType, int order) {
+    final public static Pair<SequenceFragmentRAFIdx, SequenceFragmentRAFIdx> domainSeq(int nodeID, int styleType, int order) {
         try {
             Statement stmt = LocalSQL.createStatement();
-            ResultSet rs = stmt.executeQuery("select description from scop_node where id=" + domainID);
+            ResultSet rs = stmt.executeQuery("select description from scop_node where id=" + nodeID);
             rs.next();
             String description = rs.getString(1).substring(5);
             rs.close();
             char chain = ' ';
             char lastChain = ' ';
-            SequenceFragmentRAFIdx rv = new SequenceFragmentRAFIdx();
+            SequenceFragmentRAFIdx rvATOM = new SequenceFragmentRAFIdx();
+            SequenceFragmentRAFIdx rvSEQRES = new SequenceFragmentRAFIdx();
             int currentChain = 0;
             boolean firstRegion = true;
             boolean addedFragment = false;
@@ -396,15 +372,14 @@ public class PopulateModelvsDomain {
                     // System.out.println("using region "+region);
                     if ((body == null) || (chain != lastChain)) {
                         // get a new RAF body
-                        System.out.println("getting RAF for "+domainID);
-			String query = "select raf_get_body(r.id) from raf r, pdb_chain c, link_pdb l, scop_node n where r.pdb_chain_id=c.id and l.pdb_chain_id=c.id and c.chain=\"" + chain + "\" and l.node_id=n.id and r.first_release_id is null and r.last_release_id is null and r.raf_version_id = 3 and n.id=" + domainID + ";";
-			System.out.println(query);
+                        System.out.println("getting RAF for "+nodeID);
+			String query = "select raf_get_body(r.id) from raf r, pdb_chain c, link_pdb l, scop_node n where r.pdb_chain_id=c.id and l.pdb_chain_id=c.id and c.chain=\"" + chain + "\" and l.node_id=n.id and r.first_release_id is null and r.last_release_id is null and r.raf_version_id = 3 and n.id=" + nodeID + " group by r.line;";
                         rs = stmt.executeQuery(query);
                         if (!rs.next()) {
                             System.out.println("RAF not found");
-                            rs = stmt.executeQuery("select raf_get_body(r.id) from raf r, pdb_chain c, link_pdb l, scop_node n where r.pdb_chain_id=c.id and l.pdb_chain_id=c.id and c.chain=\"" + Character.toLowerCase(chain) + "\" and l.node_id=n.id and n.release_id >= r.first_release_id and n.release_id <= r.last_release_id and n.id=" + domainID);
+                            rs = stmt.executeQuery("select raf_get_body(r.id) from raf r, pdb_chain c, link_pdb l, scop_node n where r.pdb_chain_id=c.id and l.pdb_chain_id=c.id and c.chain=\"" + Character.toLowerCase(chain) + "\" and l.node_id=n.id and n.release_id >= r.first_release_id and n.release_id <= r.last_release_id and n.id=" + nodeID);
                             if (rs.next()) {
-                                System.out.println(domainID + " " + description + " needs case fixed.");
+                                System.out.println(nodeID + " " + description + " needs case fixed.");
                             } else {
                                 rs.close();
                                 stmt.close();
@@ -412,7 +387,7 @@ public class PopulateModelvsDomain {
                             }
                         }
                         body = rs.getString(1);
-			System.out.println("body: "+ body);
+			// System.out.println("body: "+ body);
                         if (rs.next()) {
                             System.out.println("error - raf logic wrong");
                             System.exit(1);
@@ -427,34 +402,40 @@ public class PopulateModelvsDomain {
                         firstRes = m.group(1);
                         lastRes = m.group(2);
                     }
-                    SequenceFragmentRAFIdx f = null;
+                    Pair<SequenceFragmentRAFIdx, SequenceFragmentRAFIdx> fPair = null;
+		    SequenceFragmentRAFIdx fATOM = null;
+		    SequenceFragmentRAFIdx fSEQRES = null;
+		    
 
                     if ((firstRes != null) && (lastRes != null)) {
-                        f = partialChainSeq(body, sourceType, firstRes, lastRes);
+                        fPair = partialChainSeqPair(body, firstRes, lastRes);
+			fATOM = fPair.getKey();
+			fSEQRES = fPair.getValue();
 		    } else {
-                        // for SEQRES, we only want region within ATOMs
-                        int st2 = sourceType;
-                        if (st2 == 2) st2++;
-                        f = wholeChainSeq(body, st2);
+                        fPair = wholeChainSeqPair(body);
+			fATOM = fPair.getKey();
+			fSEQRES = fPair.getValue();
                     }
 
                     // if error, blow the whole sequence
-                    if (f == null) {
+                    if (fPair == null) {
                         stmt.close();
                         return null;
                     }
 
                     // append f to end, with X if needed
                     if (addedFragment)
-                        rv.append('X');
-                    rv.append(f);
+                        rvATOM.append('X');
+                        rvSEQRES.append('X');
+                    rvATOM.append(fATOM);
+                    rvSEQRES.append(fSEQRES);
                     addedFragment = true;
                 }
 
                 lastChain = chain;
             }
             stmt.close();
-            return rv;
+            return new Pair<> (rvATOM, rvSEQRES);
         } catch (Exception e) {
             System.out.println("Exception: " + e.getMessage());
             e.printStackTrace();
@@ -471,50 +452,22 @@ public class PopulateModelvsDomain {
        <p/>
        (as in astral_seq_source table)
     */
-    final public static SequenceFragmentRAFIdx wholeChainSeq(String body, int sourceType) throws IllegalArgumentException {
+    final public static Pair<SequenceFragmentRAFIdx, SequenceFragmentRAFIdx> wholeChainSeqPair(String body) throws IllegalArgumentException {
         int l = body.length();
-        SequenceFragmentRAFIdx rv = new SequenceFragmentRAFIdx(l / 7);
-        boolean inSeq = true;
-        int atomStart = 0;
-        int atomEnd = l - 7;
-        if (sourceType == 3) {
-            for (int i = 0; i < l; i += 7) {
-                if (body.charAt(i + 5) != '.') {
-                    atomStart = i;
-                    break;
-                }
-            }
-            for (int i = l - 7; i >= 0; i -= 7) {
-                if (body.charAt(i + 5) != '.') {
-                    atomEnd = i;
-                    break;
-                }
-            }
-        }
+        SequenceFragmentRAFIdx rvATOM = new SequenceFragmentRAFIdx(l / 7);
+        SequenceFragmentRAFIdx rvSEQRES = new SequenceFragmentRAFIdx(l / 7);
         for (int i = 0; i < l; i += 7) {
             char atomRes = body.charAt(i + 5);
             char seqRes = body.charAt(i + 6);
 	    int RAFidx = Math.floorDiv(i, 7);
 
-            if (sourceType == 3) {
-                if (i < atomStart || i > atomEnd) {
-                    inSeq = false;
-                } else {
-                    inSeq = true;
-                }
-            }
-            char seqChar;
-            if (sourceType == 1) {
-                seqChar = atomRes;
-            } else if (sourceType == 2 || sourceType == 3) {
-                seqChar = seqRes;
-            } else {
-                throw new IllegalArgumentException("'sourceType' must have value 1, 2, or 3.");
-            }  
-            if (inSeq && seqChar != '.' && seqChar != '"')
-                rv.append(seqChar, RAFidx);
+            if (atomRes != '.' && atomRes != '"')
+                rvATOM.append(atomRes, RAFidx);
+
+            if (seqRes != '.' && seqRes != '"')
+                rvSEQRES.append(seqRes, RAFidx);
         }
-        return rv;
+        return new Pair<> (rvATOM, rvSEQRES);
     }
 
 
@@ -561,7 +514,7 @@ public class PopulateModelvsDomain {
 	}
 
 	public static void testOneComparison(String sid) {
-		int testModelId = 55654;
+		int testModelId = 7615;
 	        int releaseID = 17;
 		try {
 		    String modelDir = getModelDir(testModelId);
@@ -572,7 +525,7 @@ public class PopulateModelvsDomain {
 		}
 	}
 	public static void populateTest() {
-		int testModelId = 55654;
+		int testModelId = 7615;
 	        int releaseID = 17;
 		try {
 		    populateOneModel(releaseID, testModelId);
